@@ -1,27 +1,3 @@
-"""
-Training entry for the proposed interval-target regularization.
-
-Paper objective
----------------
-
-    L = L_main + lambda * L_B
-
-where
-
-    L_B =
-        1/N * sum_{s,t,k} (w - f)^2
-        +
-        1/M * sum_{s,t} |sum_k f - 1|.
-
-The disjoint historical interval width is controlled by
-``interval_step``. The main paper setting uses interval_step = 2.
-python main_window_interval_rescaled.py \
-    --model akt \
-    --dataset assist09 \
-    --interval_step 2 \
-    --window_reg_weight 0.01
-"""
-
 import argparse
 import importlib
 import os
@@ -48,35 +24,15 @@ from baseline.window_interval_rescaled import (
 
 
 def parse_experiment_args():
-    """
-    Parse only arguments specific to the proposed interval-target method.
-
-    All remaining arguments are passed to the original main.py.
-    """
 
     parser = argparse.ArgumentParser(
         add_help=False
     )
-
-    # ------------------------------------------------------------
-    # Delta in:
-    #
-    #   (0, Delta], (Delta, 2Delta], ...
-    #
-    # Main paper setting:
-    #   Delta = 2
-    # ------------------------------------------------------------
     parser.add_argument(
         "--interval_step",
         type=int,
         default=2,
     )
-
-    # ------------------------------------------------------------
-    # lambda in:
-    #
-    #   L = L_main + lambda * L_B
-    # ------------------------------------------------------------
     parser.add_argument(
         "--window_reg_weight",
         type=float,
@@ -88,22 +44,13 @@ def parse_experiment_args():
         default=200,
     )
 
-    # ------------------------------------------------------------
-    # Embedding dimension for:
-    #
-    #   interval start
-    #   interval end
-    #   history length
-    # ------------------------------------------------------------
+
     parser.add_argument(
         "--interval_index_dim",
         type=int,
         default=32,
     )
 
-    # ------------------------------------------------------------
-    # Hidden dimension of the target MLP
-    # ------------------------------------------------------------
     parser.add_argument(
         "--interval_hidden_dim",
         type=int,
@@ -141,9 +88,6 @@ def parse_experiment_args():
 EXP = parse_experiment_args()
 
 
-# ================================================================
-# Load original main
-# ================================================================
 
 base_main = importlib.import_module(
     os.environ.get(
@@ -340,16 +284,7 @@ def model_forward_with_interval_aux(
     model_name,
     num_q=None,
 ):
-    """
-    Run the original training forward pass and add the interval
-    auxiliary loss when the wrapped model exposes ``window_aux_loss``.
 
-    The wrapped model already stores
-
-        window_aux_loss = lambda * L_B,
-
-    so it must be added only once here.
-    """
 
     result = original_model_forward(
         model,
