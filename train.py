@@ -18,14 +18,14 @@ def batch_to_device(batch_data, device):
 
 
 def cal_loss(model_name, ys, rshft, mask, preloss):
-    if model_name in ["dkt", "dkt_plus", "dktplus", "dkt+", "dkvmn", "sakt", "gkt", "simplekt", "sparsekt","cskt","mykt","akt", "robustkt", "folibikt", "lefokt_akt", "mikt", "skvmn", "atkt"]:
+    if model_name in ["sakt", "simplekt", "sparsekt", "akt", "robustkt", "folibikt"]:
         y = torch.masked_select(ys[0], mask)
         t = torch.masked_select(rshft.float(), mask)
         loss = F.binary_cross_entropy(y.double(), t.double())
         if preloss:
             loss = loss + preloss[0]
     else:
-        raise ValueError(f"不支持的模型 loss: {model_name}")
+        raise ValueError(f" loss: {model_name}")
     return loss
 
 
@@ -62,65 +62,16 @@ def model_forward(model, batch, device, model_name, num_q=None):
 
     ys, preloss = [], []
 
-    if model_name == "dkt":
-        y_all = model(c.long(), r.long())
-        y_pred = (y_all * F.one_hot(cshft.long(), model.num_q)).sum(-1)
-        ys = [y_pred]
-
-    elif model_name in ["dkt_plus", "dktplus", "dkt+"]:
-        y_all = model(c.long(), r.long())
-        y_next = (y_all * F.one_hot(cshft.long(), model.num_q)).sum(-1)
-        y_curr = (y_all * F.one_hot(c.long(), model.num_q)).sum(-1)
-        loss = F.binary_cross_entropy(
-            torch.masked_select(y_next, mask).double(),
-            torch.masked_select(rshft.float(), mask).double(),
-        )
-        if model.training:
-            loss_r = F.binary_cross_entropy(
-                torch.masked_select(y_curr, mask).double(),
-                torch.masked_select(r.float(), mask).double(),
-            )
-            smooth_mask = mask[:, 1:]
-            state_diff = y_all[:, 1:] - y_all[:, :-1]
-            loss_w1 = torch.masked_select(
-                torch.norm(state_diff, p=1, dim=-1),
-                smooth_mask,
-            ).mean() / model.num_q
-            loss_w2 = torch.masked_select(
-                torch.norm(state_diff, p=2, dim=-1).pow(2),
-                smooth_mask,
-            ).mean() / model.num_q
-            loss = (
-                loss
-                + model.lambda_r * loss_r
-                + model.lambda_w1 * loss_w1
-                + model.lambda_w2 * loss_w2
-            )
-        return loss, y_next, rshft, mask
-
-    elif model_name == "sakt":
+    if model_name == "sakt":
         out = model(c.long(), r.long(), cshft.long())
         y_pred = out[0] if isinstance(out, tuple) else out
         ys = [y_pred]
-
-
-    elif model_name == "dkvmn":
-        y_pred, _ = model(cc.long(), cr.long())
-        ys = [y_pred[:, 1:]]
-
-    elif model_name in ["akt", "robustkt", "mykt", "folibikt", "lefokt_akt"]:
+    elif model_name in ["akt", "robustkt", "folibikt"]:
         y_pred, reg_loss = model(cc.long(), cr.long(), pid_data=cq.long())
         ys = [y_pred[:, 1:]]
         preloss = [reg_loss]
-    elif model_name in ["sparsekt"]:
-        dcur = {
-            "qseqs": q.long(),
-            "cseqs": c.long(),
-            "rseqs": r.long(),
-            "shft_qseqs": qshft.long(),
-            "shft_cseqs": cshft.long(),
-            "shft_rseqs": rshft.long(),
-        }
+    elif model_name == "sparsekt":
+        dcur = {"qseqs": q.long(), "cseqs": c.long(), "rseqs": r.long(), "shft_qseqs": qshft.long(), "shft_cseqs": cshft.long(), "shft_rseqs": rshft.long()}
         if model.training:
             y, _, _, c_reg_loss = model(dcur, train=True)
             ys = [y[:, 1:]]
@@ -128,87 +79,17 @@ def model_forward(model, batch, device, model_name, num_q=None):
                 preloss = [c_reg_loss]
         else:
             ret = model(dcur, train=False)
-            y = ret[0] if isinstance(ret, tuple) else ret
-            ys = [y[:, 1:]]
-
-    elif model_name in ["simplekt"]:
-        dcur = {
-            "qseqs": q.long(),
-            "cseqs": c.long(),
-            "rseqs": r.long(),
-            "shft_qseqs": qshft.long(),
-            "shft_cseqs": cshft.long(),
-            "shft_rseqs": rshft.long(),
-        }
+            ys = [(ret[0] if isinstance(ret, tuple) else ret)[:, 1:]]
+    elif model_name == "simplekt":
+        dcur = {"qseqs": q.long(), "cseqs": c.long(), "rseqs": r.long(), "shft_qseqs": qshft.long(), "shft_cseqs": cshft.long(), "shft_rseqs": rshft.long()}
         if model.training:
             y, y2, y3 = model(dcur, train=True)
             ys = [y[:, 1:], y2, y3]
         else:
             y = model(dcur, train=False)
             ys = [y[:, 1:]]
-    elif model_name == "cskt":
-        dcur = {
-            "qseqs": q.long(),
-            "cseqs": c.long(),
-            "rseqs": r.long(),
-            "shft_qseqs": qshft.long(),
-            "shft_cseqs": cshft.long(),
-            "shft_rseqs": rshft.long(),
-        }
-        if model.training:
-            y, y2, y3 = model(dcur, train=True)
-            ys = [y[:, 1:], y2, y3]
-        else:
-            y = model(dcur, train=False)
-            ys = [y[:, 1:]]
-    elif model_name == "mikt":
-        feed_dict = {
-            "questions": cq.long() + 1,
-            "skills": cc.long() + 1,
-            "responses": cr.long(),
-        }
-        out_dict = model(feed_dict)
-        ys = [out_dict["pred"]]
-    elif model_name == "skvmn":
-        feed_dict = {
-            "skills": cc.long() + 1,
-            "responses": cr.long(),
-        }
-        out_dict = model(feed_dict)
-        ys = [out_dict["pred"]]
-    elif model_name == "atkt":
-        feed_dict = {
-            "skills": cc.long() + 1,
-            "responses": cr.long(),
-        }
-        out_dict = model(feed_dict)
-        ys = [out_dict["pred"]]
-        if model.training:
-            pred = torch.masked_select(out_dict["pred"], mask)
-            true = torch.masked_select(rshft.float(), mask)
-            clean_loss = F.binary_cross_entropy(pred.double(), true.double())
-            feature_grad = torch.autograd.grad(
-                clean_loss,
-                out_dict["features"],
-                retain_graph=True,
-            )[0]
-            norm = torch.sqrt(torch.sum(feature_grad.pow(2), dim=(1, 2), keepdim=True))
-            perturbation = model.epsilon * feature_grad.detach() / (norm + 1e-16)
-            adv_out = model(feed_dict, perturbation)
-            adv_pred = torch.masked_select(adv_out["pred"], mask)
-            adv_loss = F.binary_cross_entropy(adv_pred.double(), true.double())
-            preloss = [model.beta * adv_loss]
-    elif model_name =="dtransformer":
-        if model.training:
-            loss, y_pred, _, _ = model.get_cl_loss(cc.long(), cr.long(), cq.long())
-            y_pred = y_pred[:, 1:] if y_pred is not None else None
-            return loss, y_pred, rshft, mask
-        logits, _, _, _, _ = model.predict(cc.long(), cr.long(), cq.long())
-        y_pred = torch.sigmoid(logits[:, 1:])
-        return None, y_pred, rshft, mask
-
     else:
-        raise ValueError(f"不支持的模型 forward: {model_name}")
+        raise ValueError(f"Unsupported model for this BAT release: {model_name}")
 
     loss = cal_loss(model_name, ys, rshft, mask, preloss)
     return loss, ys[0], rshft, mask
@@ -252,14 +133,7 @@ def train(model, loaders, args, criterion=None):
     valid_loader = loaders["valid"]
     test_loader = loaders["test"]
 
-    if model_name == "dtransformer":
-        optimizer = torch.optim.AdamW(
-            model.parameters(),
-            lr=model.default_learning_rate,
-            weight_decay=model.default_weight_decay,
-        )
-    else:
-        optimizer = torch.optim.Adam(
+    optimizer = torch.optim.Adam(
             model.parameters(),
             lr=args.lr,
             weight_decay=getattr(args, "l2", 0.0) if model_name == "cl4kt" else 0.0,
@@ -374,3 +248,6 @@ def train(model, loaders, args, criterion=None):
         print(f"\nResult saved to: {os.path.join(args.log_dir, 'result.txt')}")
     else:
         print("Error: No model saved.")
+
+
+
