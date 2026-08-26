@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import json
 import os
 import random
@@ -19,25 +19,15 @@ from utils.dataloader import (
 from utils.collab_loss import CollabLossEngine
 from utils.cl4kt_dataloader import  SimCLRDatasetWrapper
 from baseline.simplekt import simpleKT
-from baseline.DKT import DKT
-from baseline.DKT_Plus import DKTPlus
 from baseline.SAKT import SAKT
-from baseline.DTransformer import DTransformer
-from baseline.DKVMN import DKVMN
 from baseline.AKT import AKT
 from baseline.sparsekt import sparseKT
 from baseline.cl4kt import CL4KT
-from baseline.cskt import CSKT
-from baseline.mykt import mykt
 from baseline.robustkt import Robustkt
 from baseline.folibikt import folibiKT
-from baseline.lefokt_akt import LEFOKT_AKT
-from baseline.mikt import MIKT
-from baseline.skvmn import SKVMN
-from baseline.atkt import ATKT
 
 
-#python main.py --model alkt --dataset assist09 
+#python main.py --model simplekt --dataset assist09 
 def set_seed(seed: int = 42):
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
@@ -53,8 +43,8 @@ def set_seed(seed: int = 42):
 def get_args():
     parser = argparse.ArgumentParser(description="Knowledge Tracing Training Script")
 
-    parser.add_argument("--model", "--model_name", dest="model", type=str, default="mykt",
-                        help="Model name: dkt, sakt, akt, simplekt, robustkt, sparsekt/spareskt, cl4kt, etc.")
+    parser.add_argument("--model", "--model_name", dest="model", type=str, default="simplekt",
+                        help="Model name: akt, sakt, folibikt, simplekt, sparsekt, robustkt, or cl4kt.")
     parser.add_argument("--dataset", "--dataset_name", dest="dataset", type=str, default="assist09",
                         help="Dataset name: assist09/assistments09, assist12/assistments12, assist17/assistments17, junyi, algebra05, ednet")
     parser.add_argument("--seed", type=int, default=42)
@@ -67,28 +57,14 @@ def get_args():
     parser.add_argument("--d_model", type=int, default=128)
     parser.add_argument("--n_blocks", type=int, default=2)
     parser.add_argument("--num_attn_heads", type=int, default=8)
-    parser.add_argument(
-        "--qk_content_mode", type=str, default="dot", choices=["dot", "cos"],
-        help="Q/K content scorer for compatible attention KT backbones.",
-    )
-    parser.add_argument(
-        "--cosine_scale_init", type=float, default=1.0,
-        help="Initial positive per-head cosine content scale.",
-    )
+
     parser.add_argument("--seq_len", "--maxstep", dest="seq_len", type=int, default=200)
     parser.add_argument("--d_ff", type=int, default=256)
     parser.add_argument("--final_fc_dim", type=int, default=512)
     parser.add_argument("--separate_qa", type=int, default=0,
                         help="Use question-response pair embeddings instead of response embedding plus question embedding.")
+  
 
-
-    parser.add_argument(
-        "--lefokt_emb_type",
-        type=str,
-        default="qid_sandwich",
-        choices=["qid", "qid_alibi", "qid_log", "qid_power", "qid_t5", "qid_fire", "qid_sandwich"],
-        help="Relative-position branch used by LEFOKT-AKT.",
-    )
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--patience", type=int, default=12)
     parser.add_argument("--tuning", type=int, default=0,
@@ -198,36 +174,7 @@ def main():
         "final_fc_dim": args.final_fc_dim,
         "d_ff": args.d_ff,
         "dropout": args.dropout,
-        "qk_content_mode": args.qk_content_mode,
-        "cosine_scale_init": args.cosine_scale_init,
     }
-    if model_name == "dtransformer":
-        model_config = DTransformer.default_config()
-        train_config["learning_rate"] = DTransformer.default_learning_rate
-        train_config["weight_decay"] = DTransformer.default_weight_decay
-        train_config["optimizer"] = "AdamW"
-    elif model_name == "mykt":
-        model_config["kt_attn"] = "state_discrepancy"
-        model_config["sd_use_gap"] = bool(args.sd_use_gap)
-        model_config["sd_use_alibi"] = bool(args.sd_use_alibi)
-        model_config["sd_content_mode"] = args.sd_content_mode
-        model_config["sd_gap_mode"] = args.sd_gap_mode
-        model_config["sd_gap_dim"] = args.sd_gap_dim
-        model_config["sd_gap_reduce"] = args.sd_gap_reduce
-        model_config["sd_content_scale_init"] = args.sd_content_scale_init
-        model_config["sd_gap_scale_init"] = args.sd_gap_scale_init
-        model_config["sd_learnable_alibi_scale"] = bool(args.sd_learnable_alibi_scale)
-
-    elif model_name == "lefokt_akt":
-        model_config["emb_type"] = args.lefokt_emb_type
-    elif model_name == "mikt":
-        model_config = {
-            "embedding_size": args.mikt_embedding_size,
-            "state_d": args.mikt_state_dim,
-            "dropout": args.dropout,
-            "q_matrix": "dense item-KC matrix from preprocessed_df.csv",
-        }
-
     if model_name == "cl4kt":
         model_config.update({
             "reg_cl": 0.1,
@@ -318,115 +265,31 @@ def main():
     loaders = {"train": train_loader, "valid": valid_loader, "test": test_loader}
 
     print(f"Initializing {model_name} model...")
-    if model_name == "dkt":
-        model = DKT(num_q=num_skills, emb_size=args.d_model, hidden_size=args.d_model).to(device)
-    elif model_name in ["dkt_plus", "dktplus", "dkt+"]:
-        model = DKTPlus(num_q=num_skills, emb_size=args.d_model, hidden_size=args.d_model).to(device)
-    elif model_name == "sakt":
+    if model_name == "sakt":
         model = SAKT(num_c=num_skills, seq_len=seq_len, emb_size=args.d_model, num_attn_heads=args.num_attn_heads, dropout=args.dropout).to(device)
-    elif model_name == "dkvmn":
-        model = DKVMN(num_q=num_skills, dim_s=args.d_model, size_m=20).to(device)
-    elif model_name == "dtransformer":
-        model = DTransformer(n_questions=num_skills, n_pid=num_questions).to(device)
     elif model_name == "akt":
         model = AKT(n_question=num_skills, n_pid=num_questions, d_model=args.d_model, n_blocks=args.n_blocks, dropout=args.dropout, num_attn_heads=args.num_attn_heads).to(device)
     elif model_name == "folibikt":
-        model = folibiKT(
-            n_question=num_skills,
-            n_pid=num_questions,
-            d_model=args.d_model,
-            n_blocks=args.n_blocks,
-            dropout=args.dropout,
-            d_ff=args.d_ff,
-            final_fc_dim=args.final_fc_dim,
-            num_attn_heads=args.num_attn_heads,
-            separate_qa=bool(args.separate_qa),
-            seq_len=seq_len,
-            emb_type="qid_alibi",
-        ).to(device)
-    elif model_name == "lefokt_akt":
-        model = LEFOKT_AKT(
-            n_question=num_skills,
-            n_pid=num_questions,
-            d_model=args.d_model,
-            n_blocks=args.n_blocks,
-            dropout=args.dropout,
-            d_ff=args.d_ff,
-            final_fc_dim=args.final_fc_dim,
-            num_attn_heads=args.num_attn_heads,
-            separate_qa=bool(args.separate_qa),
-            emb_type=args.lefokt_emb_type,
-        ).to(device)
-    elif model_name == "mykt":
-        model = mykt(n_question=num_skills, n_pid=num_questions, d_model=args.d_model, n_blocks=args.n_blocks, dropout=args.dropout, num_attn_heads=args.num_attn_heads,
-                     separate_qa=bool(args.separate_qa),
-                     sd_use_gap=bool(args.sd_use_gap),
-                     sd_use_alibi=bool(args.sd_use_alibi),
-                     sd_content_mode=args.sd_content_mode,
-                     sd_gap_mode=args.sd_gap_mode,
-                     sd_gap_dim=args.sd_gap_dim,
-                     sd_gap_reduce=args.sd_gap_reduce,
-                     sd_content_scale_init=args.sd_content_scale_init,
-                     sd_gap_scale_init=args.sd_gap_scale_init,
-                     sd_learnable_alibi_scale=bool(args.sd_learnable_alibi_scale)).to(device)
+        model = folibiKT(n_question=num_skills, n_pid=num_questions, d_model=args.d_model, n_blocks=args.n_blocks, dropout=args.dropout, d_ff=args.d_ff, final_fc_dim=args.final_fc_dim, num_attn_heads=args.num_attn_heads, separate_qa=bool(args.separate_qa), seq_len=seq_len, emb_type="qid_alibi").to(device)
     elif model_name == "simplekt":
         model = simpleKT(n_question=num_skills, n_pid=num_questions, d_model=args.d_model, n_blocks=args.n_blocks, dropout=args.dropout, num_attn_heads=args.num_attn_heads).to(device)
     elif model_name == "robustkt":
         model = Robustkt(n_question=num_skills, n_pid=num_questions, d_model=args.d_model, n_blocks=args.n_blocks, dropout=args.dropout, num_attn_heads=args.num_attn_heads, separate_qa=bool(args.separate_qa)).to(device)
-    elif model_name in ["sparsekt"]:
-        model = sparseKT(n_question=num_skills, n_pid=num_questions, d_model=args.d_model, n_blocks=args.n_blocks, dropout=args.dropout,
-                         num_attn_heads=args.num_attn_heads, seq_len=seq_len, emb_type="qid_sparseattn").to(device)
+    elif model_name == "sparsekt":
+        model = sparseKT(n_question=num_skills, n_pid=num_questions, d_model=args.d_model, n_blocks=args.n_blocks, dropout=args.dropout, num_attn_heads=args.num_attn_heads, seq_len=seq_len, emb_type="qid_sparseattn").to(device)
     elif model_name == "cl4kt":
         model = CL4KT(num_skills, num_questions, seq_len, **model_config).to(device)
-    elif model_name == "cskt":
-        model = CSKT(n_question=num_skills, n_pid=num_questions, d_model=args.d_model, n_blocks=args.n_blocks, dropout=args.dropout,
-                     d_ff=args.d_ff, kq_same=args.kq_same, final_fc_dim=args.final_fc_dim,
-                     num_attn_heads=args.num_attn_heads, seq_len=seq_len, emb_type="qid").to(device)
-    elif model_name == "mikt":
-        relation_df = pd.read_csv(
-            args.preprocessed_path,
-            sep="\t",
-            usecols=["item_id", "skill_id"],
-        ).drop_duplicates()
-        item_ids = torch.as_tensor(relation_df["item_id"].to_numpy() + 1, dtype=torch.long, device=device)
-        skill_ids = torch.as_tensor(relation_df["skill_id"].to_numpy() + 1, dtype=torch.long, device=device)
-        mikt_num_questions = int(item_ids.max().item()) + 1
-        mikt_num_skills = int(skill_ids.max().item()) + 1
-        pro2skill = torch.zeros((mikt_num_questions, mikt_num_skills), device=device)
-        pro2skill[item_ids, skill_ids] = 1.0
-        model = MIKT(
-            mikt_num_skills,
-            mikt_num_questions,
-            seq_len,
-            pro2skill,
-            state_d=args.mikt_state_dim,
-            embedding_size=args.mikt_embedding_size,
-            dropout=args.dropout,
-        ).to(device)
-    elif model_name == "skvmn":
-        model = SKVMN(
-            num_skills + 1,
-            dim_s=args.skvmn_dim_s,
-            size_m=args.skvmn_size_m,
-            dropout=args.dropout,
-        ).to(device)
-    elif model_name == "atkt":
-        model = ATKT(
-            num_skills + 1,
-            skill_dim=args.atkt_skill_dim,
-            answer_dim=args.atkt_answer_dim,
-            hidden_dim=args.atkt_hidden_dim,
-            attention_dim=args.atkt_attention_dim,
-            epsilon=args.atkt_epsilon,
-            beta=args.atkt_beta,
-            dropout=args.dropout,
-        ).to(device)
     else:
-        raise ValueError(f"Model initialization is not implemented: {model_name}")
+        raise ValueError("Unsupported model for this BAT release: " + model_name)
 
     train(model, loaders, args)
 
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
 
